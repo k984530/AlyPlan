@@ -1,0 +1,156 @@
+{
+  "name": "alyplan-vscode",
+  "displayName": "AlyPlan",
+  "description": "AI 수정 제안을 시각적으로 리뷰하는 마크다운 기획서 도우미",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "alyduho",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "workspaceContains:**/*.suggestions.json",
+    "onLanguage:markdown"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "alyplan",
+          "title": "AlyPlan",
+          "icon": "resources/alyplan-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "alyplan": [
+        {
+          "id": "alyplan.reviewPanel",
+          "type": "webview",
+          "name": "Review"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "alyplan.accept",
+        "title": "Accept Suggestion",
+        "icon": "$(check)"
+      },
+      {
+        "command": "alyplan.reject",
+        "title": "Reject Suggestion",
+        "icon": "$(close)"
+      },
+      {
+        "command": "alyplan.editAndAccept",
+        "title": "Edit & Accept",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "alyplan.acceptAll",
+        "title": "Accept All Suggestions"
+      },
+      {
+        "command": "alyplan.rejectAll",
+        "title": "Reject All Suggestions"
+      },
+      {
+        "command": "alyplan.refresh",
+        "title": "Refresh Suggestions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "alyplan.init",
+        "title": "AlyPlan: Initialize for Current Markdown File"
+      },
+      {
+        "command": "alyplan.installSuggestCommand",
+        "title": "AlyPlan: Install /suggest Command for Claude Code"
+      },
+      {
+        "command": "alyplan.showDiff",
+        "title": "AlyPlan: Show Diff",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "alyplan.diffAccept",
+        "title": "AlyPlan: Accept (Diff)",
+        "icon": "$(check)"
+      },
+      {
+        "command": "alyplan.diffReject",
+        "title": "AlyPlan: Reject (Diff)",
+        "icon": "$(close)"
+      },
+      {
+        "command": "alyplan.diffClose",
+        "title": "AlyPlan: Close Diff",
+        "icon": "$(arrow-left)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "alyplan.refresh",
+          "when": "view == alyplan.reviewPanel",
+          "group": "navigation"
+        },
+        {
+          "command": "alyplan.acceptAll",
+          "when": "view == alyplan.reviewPanel"
+        },
+        {
+          "command": "alyplan.rejectAll",
+          "when": "view == alyplan.reviewPanel"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "alyplan.diffAccept",
+          "when": "alyplan.diffActive",
+          "group": "navigation@1"
+        },
+        {
+          "command": "alyplan.diffReject",
+          "when": "alyplan.diffActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "alyplan.diffClose",
+          "when": "alyplan.diffActive",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AlyPlan",
+      "properties": {
+        "alyplan.highlightColor": {
+          "type": "string",
+          "default": "rgba(255, 213, 79, 0.15)",
+          "description": "제안이 있는 라인의 하이라이트 색상"
+        },
+        "alyplan.gutterIconColor": {
+          "type": "string",
+          "default": "#FFD54F",
+          "description": "거터 아이콘 색상"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "mermaid": "^11.4.0",
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.5.0"
+  }
+}
