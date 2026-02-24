@@ -188,9 +188,7 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
 
           body += `<div class="sug-block" onclick="revealLine(${sug.anchor.startLine})">`;
           body += `<div class="sug-anchor-hl">`;
-          for (const al of anchorLines) {
-            body += `<div class="md-line">${this.renderLine(al)}</div>`;
-          }
+          body += this.renderMarkdownBlock(anchorLines.join('\n'));
           body += `</div>`;
           body += this.renderCard(sug, sugIdx);
           body += `</div>`;
@@ -942,6 +940,66 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       .replace(/`(.+?)`/g, '<code class="md-inline-code">$1</code>');
   }
 
+  /* ─── 멀티라인 마크다운 렌더링 (제안 텍스트용) ─── */
+  private renderMarkdownBlock(text: string): string {
+    const lines = text.split('\n');
+    let result = '';
+    let inCode = false;
+    let codeBuf = '';
+    let inTable = false;
+    let tableRows: string[][] = [];
+
+    const flushTable = () => {
+      if (tableRows.length === 0) return;
+      const headerRow = tableRows[0];
+      const dataRows = tableRows.slice(1);
+      result += `<div class="md-table-wrap"><table class="md-table">`;
+      result += `<thead><tr>${headerRow.map(c => `<th>${this.inlineFmt(c)}</th>`).join('')}</tr></thead>`;
+      if (dataRows.length) {
+        result += `<tbody>${dataRows.map(r => `<tr>${r.map(c => `<td>${this.inlineFmt(c)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+      }
+      result += `</table></div>`;
+      tableRows = [];
+      inTable = false;
+    };
+
+    for (const line of lines) {
+      // 코드 블록 처리
+      if (line.trim().startsWith('```')) {
+        if (inTable) flushTable();
+        if (inCode) {
+          result += `<pre class="md-code">${this.esc(codeBuf)}</pre>`;
+          codeBuf = '';
+          inCode = false;
+        } else {
+          inCode = true;
+        }
+        continue;
+      }
+      if (inCode) {
+        codeBuf += line + '\n';
+        continue;
+      }
+
+      // 테이블 행 처리
+      if (line.includes('|') && line.trim().startsWith('|')) {
+        // 구분선 (|---|---|) → 스킵하되 테이블 상태 유지
+        if (line.match(/^\|[\s:|-]+\|$/)) continue;
+        const cells = line.split('|').filter(c => c !== '').map(c => c.trim());
+        tableRows.push(cells);
+        inTable = true;
+        continue;
+      }
+      if (inTable) flushTable();
+
+      result += `<div class="md-line">${this.renderLine(line)}</div>`;
+    }
+
+    if (inTable) flushTable();
+
+    return result;
+  }
+
   /* ─── 제안 카드 렌더링 ─── */
 
   private renderCard(sug: Suggestion, idx: number): string {
@@ -969,23 +1027,23 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       panelsHtml = alts.map((alt, i) => `
         <div class="panel ${i === 0 ? '' : 'panel-hidden'}" data-card="${safeId}" data-idx="${i}"
              data-text="${this.escAttr(alt.text)}">
-          <pre class="suggested-text">${this.esc(alt.text)}</pre>
-          ${alt.reasoning ? `<div class="alt-reason">${this.esc(alt.reasoning)}</div>` : ''}
+          <div class="suggested-text">${this.renderMarkdownBlock(alt.text)}</div>
+          ${alt.reasoning ? `<div class="alt-reason">${this.renderMarkdownBlock(alt.reasoning)}</div>` : ''}
         </div>`).join('');
     } else if (alts.length === 1) {
       panelsHtml = `
         <div class="panel" data-card="${safeId}" data-idx="0"
              data-text="${this.escAttr(alts[0].text)}">
           <div class="section-label">제안</div>
-          <pre class="suggested-text">${this.esc(alts[0].text)}</pre>
-          ${alts[0].reasoning ? `<div class="alt-reason">${this.esc(alts[0].reasoning)}</div>` : ''}
+          <div class="suggested-text">${this.renderMarkdownBlock(alts[0].text)}</div>
+          ${alts[0].reasoning ? `<div class="alt-reason">${this.renderMarkdownBlock(alts[0].reasoning)}</div>` : ''}
         </div>`;
     } else if (sug.suggestedText) {
       panelsHtml = `
         <div class="panel" data-card="${safeId}" data-idx="0"
              data-text="${this.escAttr(sug.suggestedText)}">
           <div class="section-label">제안</div>
-          <pre class="suggested-text">${this.esc(sug.suggestedText)}</pre>
+          <div class="suggested-text">${this.renderMarkdownBlock(sug.suggestedText)}</div>
         </div>`;
     }
 

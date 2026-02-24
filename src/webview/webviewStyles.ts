@@ -148,10 +148,15 @@ export const WEBVIEW_CSS = `
 
   /* 제안 텍스트 */
   .suggested-text {
-    font-family: var(--vscode-editor-font-family);
-    font-size: 12px; white-space: pre-wrap; word-break: break-word;
+    font-size: 12px; word-break: break-word;
     line-height: 1.6;
   }
+  .suggested-text .md-line { padding: 1px 0; cursor: default; }
+  .suggested-text .md-line:hover { background: transparent; }
+  .suggested-text .md-h1 { font-size: 16px; margin: 8px 0 4px; }
+  .suggested-text .md-h2 { font-size: 14px; margin: 6px 0 3px; }
+  .suggested-text .md-h3 { font-size: 13px; margin: 4px 0 2px; }
+  .suggested-text .md-code { font-size: 11px; padding: 6px 8px; margin: 4px 0; }
 
   /* 탭 */
   .tabs {
@@ -183,6 +188,8 @@ export const WEBVIEW_CSS = `
     border-left: 2px solid rgba(255,255,255,0.1);
     line-height: 1.5;
   }
+  .alt-reason .md-line { padding: 0; cursor: default; }
+  .alt-reason .md-line:hover { background: transparent; }
 
   /* 액션 버튼 */
   .actions {
