@@ -209,18 +209,23 @@ export class SuggestionService {
     const doc = await vscode.workspace.openTextDocument(mdUri);
     let mdContent = doc.getText();
 
-    // 동적 해석 후 아래→위 순서로 적용 (위치 시프트 방지)
-    const withPos = pending.map(sug => ({
-      sug,
-      pos: resolveAnchor(mdContent, sug.anchor.headingPath, sug.anchor.textContent),
-    })).filter(x => x.pos !== null)
-      .sort((a, b) => b.pos!.startLine - a.pos!.startLine);
+    // 매 적용마다 위치를 재해석하여 앵커 무효화 방지
+    let remaining = pending.filter(s => s.status === 'pending');
+    while (remaining.length > 0) {
+      const withPos = remaining.map(sug => ({
+        sug,
+        pos: resolveAnchor(mdContent, sug.anchor.headingPath, sug.anchor.textContent),
+      })).filter(x => x.pos !== null)
+        .sort((a, b) => b.pos!.startLine - a.pos!.startLine);
 
-    for (const { sug } of withPos) {
+      if (withPos.length === 0) { break; }
+
+      const { sug } = withPos[0];
       const text = getDefaultText(sug);
       const { newContent } = applySuggestion(mdContent, sug, text);
       mdContent = newContent;
       sug.status = 'accepted';
+      remaining = remaining.filter(s => s.status === 'pending');
     }
 
     // 에디터 버퍼에 직접 쓰기 (WorkspaceEdit 사용)
@@ -280,11 +285,15 @@ export class SuggestionService {
     try {
       const doc = await vscode.workspace.openTextDocument(mdUri);
       mdContent = doc.getText();
-    } catch {
+    } catch (err) {
+      this.log.appendLine(`[pruneStale] openTextDocument failed: ${err}`);
       try {
         const raw = await vscode.workspace.fs.readFile(mdUri);
         mdContent = new TextDecoder('utf-8').decode(raw);
-      } catch { return 0; }
+      } catch (err2) {
+        this.log.appendLine(`[pruneStale] readFile also failed: ${err2}`);
+        return 0;
+      }
     }
 
     const before = file.suggestions.length;
@@ -324,7 +333,7 @@ export class SuggestionService {
    */
   getAdviceMdUri(sugJsonUriStr: string): vscode.Uri {
     const sugUri = vscode.Uri.parse(sugJsonUriStr);
-    const baseName = sugUri.path.split('/').pop()!.replace(/\.suggestions\.json$/, '');
+    const baseName = (sugUri.path.split('/').pop() ?? '').replace(/\.suggestions\.json$/, '');
     const baseDir = this.getMdBaseDir(sugUri);
     return vscode.Uri.joinPath(this.getOutputDir(baseDir, baseName), `${baseName}.advice.md`);
   }
@@ -351,7 +360,9 @@ export class SuggestionService {
   private async ensureDir(dirUri: vscode.Uri): Promise<void> {
     try {
       await vscode.workspace.fs.createDirectory(dirUri);
-    } catch { /* already exists */ }
+    } catch (err) {
+      this.log.appendLine(`[ensureDir] ${dirUri.fsPath}: ${err}`);
+    }
   }
 
   private async writeAdviceMd(sugJsonUriStr: string, file: SuggestionFile): Promise<void> {
@@ -361,11 +372,13 @@ export class SuggestionService {
     try {
       const existing = await vscode.workspace.fs.readFile(adviceUri);
       const content = new TextDecoder('utf-8').decode(existing);
-      if (content.includes('다관점 평가') || content.includes('종합 점수')) {
+      if (content.includes('generated-by: LaLaAdvice') || content.includes('다관점 평가') || content.includes('종합 점수')) {
         this.log.appendLine(`[writeAdviceMd] Skipped: LaLaAdvice review exists at ${adviceUri.fsPath}`);
         return;
       }
-    } catch { /* 파일 없음 → 새로 생성 */ }
+    } catch (err) {
+      this.log.appendLine(`[writeAdviceMd] No existing file at ${adviceUri.fsPath}: ${err}`);
+    }
 
     const mdUri = this.getMdUri(sugJsonUriStr);
     let mdContent = '';
@@ -373,7 +386,9 @@ export class SuggestionService {
       try {
         const raw = await vscode.workspace.fs.readFile(mdUri);
         mdContent = new TextDecoder('utf-8').decode(raw);
-      } catch { /* 원본 파일 없으면 빈 문자열 */ }
+      } catch (err) {
+        this.log.appendLine(`[writeAdviceMd] Cannot read source md: ${err}`);
+      }
     }
     const md = generateAdviceMd(file.suggestions, file.sourceFile, mdContent);
     await this.ensureDir(vscode.Uri.joinPath(adviceUri, '..'));
@@ -395,12 +410,15 @@ export class SuggestionService {
    */
   async readAdviceMd(mdUri: vscode.Uri): Promise<string | null> {
     const dir = vscode.Uri.joinPath(mdUri, '..');
-    const baseName = mdUri.path.split('/').pop()!.replace(/\.md$/, '');
+    const baseName = (mdUri.path.split('/').pop() ?? '').replace(/\.md$/, '');
     const adviceUri = vscode.Uri.joinPath(dir, '.alyplan', baseName, `${baseName}.advice.md`);
     try {
       const raw = await vscode.workspace.fs.readFile(adviceUri);
       return new TextDecoder('utf-8').decode(raw);
-    } catch {
+    } catch (err) {
+      // FileNotFound는 정상 — 그 외 에러만 로깅
+      if (err instanceof vscode.FileSystemError && err.code === 'FileNotFound') { /* normal */ }
+      else { this.log.appendLine(`[readAdviceMd] ${adviceUri.fsPath}: ${err}`); }
       return null;
     }
   }
@@ -411,7 +429,7 @@ export class SuggestionService {
    */
   getFlowMmdUri(mdUri: vscode.Uri): vscode.Uri {
     const dir = vscode.Uri.joinPath(mdUri, '..');
-    const baseName = mdUri.path.split('/').pop()!.replace(/\.md$/, '');
+    const baseName = (mdUri.path.split('/').pop() ?? '').replace(/\.md$/, '');
     return vscode.Uri.joinPath(this.getOutputDir(dir, baseName), `${baseName}.flow.mmd`);
   }
 
@@ -423,7 +441,9 @@ export class SuggestionService {
     try {
       const raw = await vscode.workspace.fs.readFile(mmdUri);
       return new TextDecoder('utf-8').decode(raw);
-    } catch {
+    } catch (err) {
+      if (err instanceof vscode.FileSystemError && err.code === 'FileNotFound') { /* normal */ }
+      else { this.log.appendLine(`[readFlowMmd] ${mmdUri.fsPath}: ${err}`); }
       return null;
     }
   }

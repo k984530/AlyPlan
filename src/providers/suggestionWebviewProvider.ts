@@ -80,7 +80,8 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
           await vscode.commands.executeCommand('alyplan.refresh');
           return;
         }
-        if (msg.id) {
+        const ALLOWED_COMMANDS = ['accept', 'reject', 'showDiff'];
+        if (msg.id && msg.command && ALLOWED_COMMANDS.includes(msg.command)) {
           await vscode.commands.executeCommand(`alyplan.${msg.command}`, msg.id, msg.text);
         }
       },
@@ -312,77 +313,32 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       return html;
     };
 
-    // 섹션 뷰 body 생성
-    let sectionBody = '';
+    // 섹션 뷰 body 생성 (iterateMdLines로 코드블록/테이블 처리 위임)
     let currentHeading = '';
-    let secInCode = false;
-    let secCodeBuf = '';
-    let secInTable = false;
-    let secTableRows: string[][] = [];
-
-    const flushSecTable = () => {
-      if (secTableRows.length === 0) return;
-      sectionBody += this.renderTable(secTableRows);
-      secTableRows = [];
-      secInTable = false;
-    };
-
-    for (let j = 0; j < lines.length; j++) {
-      const line = lines[j];
-      const ln = j + 1;
-
-      // 코드 블록
-      if (line.trim().startsWith('```')) {
-        if (secInTable) flushSecTable();
-        if (secInCode) {
-          sectionBody += `<pre class="md-code">${this.esc(secCodeBuf)}</pre>`;
-          secCodeBuf = '';
-          secInCode = false;
-        } else {
-          secInCode = true;
-        }
-        continue;
-      }
-      if (secInCode) { secCodeBuf += line + '\n'; continue; }
-
-      // 테이블
-      if (line.includes('|') && line.trim().startsWith('|')) {
-        if (line.match(/^\|[\s:|-]+\|$/)) continue;
-        const cells = line.split('|').filter(c => c !== '').map(c => c.trim());
-        secTableRows.push(cells);
-        secInTable = true;
-        continue;
-      }
-      if (secInTable) flushSecTable();
-
-      // 섹션 헤딩 감지: 새 최상위 섹션이 시작되면 이전 섹션의 조언 삽입
-      const hMatch = line.match(/^(#{1,6})\s+(.*)/);
-      if (hMatch && hMatch[1].length <= minLevel) {
-        if (currentHeading) {
-          sectionBody += makeCallout(currentHeading);
-          if (parsedAdviceSections) {
-            const matched = this.findMatchingAdvice(currentHeading, parsedAdviceSections);
-            if (matched?.trim()) {
-              sectionBody += `<div class="advice-review-callout">${this.renderMarkdownBlock(matched)}</div>`;
-            }
-          }
-        }
-        currentHeading = hMatch[2].trim();
-      }
-
-      sectionBody += `<div class="md-line" onclick="revealLine(${ln})">${this.renderLine(line)}</div>`;
-    }
-    if (secInTable) flushSecTable();
-    // 마지막 섹션 조언
-    if (currentHeading) {
-      sectionBody += makeCallout(currentHeading);
+    const appendSectionAdvice = (): string => {
+      if (!currentHeading) { return ''; }
+      let html = makeCallout(currentHeading);
       if (parsedAdviceSections) {
         const matched = this.findMatchingAdvice(currentHeading, parsedAdviceSections);
         if (matched?.trim()) {
-          sectionBody += `<div class="advice-review-callout">${this.renderMarkdownBlock(matched)}</div>`;
+          html += `<div class="advice-review-callout">${this.renderMarkdownBlock(matched)}</div>`;
         }
       }
-    }
+      return html;
+    };
+
+    let sectionBody = this.iterateMdLines(lines, (line, ln) => {
+      let html = '';
+      const hMatch = line.match(/^(#{1,6})\s+(.*)/);
+      if (hMatch && hMatch[1].length <= minLevel) {
+        html += appendSectionAdvice();
+        currentHeading = hMatch[2].trim();
+      }
+      html += `<div class="md-line" onclick="revealLine(${ln})">${this.renderLine(line)}</div>`;
+      return html;
+    });
+    // 마지막 섹션 조언
+    sectionBody += appendSectionAdvice();
     // headingPath가 없는 조언
     const noPathAdvice = adviceMap.get('');
     if (noPathAdvice && noPathAdvice.length > 0) {
@@ -409,11 +365,11 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       ? '<button class="init-chip" onclick="send(\'init\')">초기화</button>'
       : `<span class="header-right"><span class="count">${suggestions.length}개 제안</span><button class="refresh-btn" onclick="send('refresh')" title="제안 새로고침">↻</button></span>`}
   </div>
-  ${(suggestions.length > 0 || flowMermaid || adviceReview) ? `
+  ${!needsInit ? `
   <div class="view-tabs">
     <button class="view-tab view-tab--active" onclick="switchView('all')">제안</button>
-    ${(suggestions.length > 0 || adviceReview) ? `<button class="view-tab" onclick="switchView('section')">검증</button>` : ''}
-    ${flowMermaid ? `<button class="view-tab" onclick="switchView('flow')">다이어그램</button>` : ''}
+    <button class="view-tab" onclick="switchView('section')">검증</button>
+    <button class="view-tab" onclick="switchView('flow')">다이어그램</button>
   </div>` : ''}
   <div id="view-all" class="view-pane view-pane--active">
     ${needsInit
@@ -423,7 +379,8 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
   <div id="view-section" class="view-pane">
     ${sectionBody || '<p class="empty">/LaLaAdvice를 실행하면 다관점 검증 결과가 여기에 표시됩니다</p>'}
   </div>
-  ${flowMermaid ? `<div id="view-flow" class="view-pane">
+  <div id="view-flow" class="view-pane">
+    ${flowMermaid ? `
     <div class="flow-toolbar">
       <button class="flow-zoom-btn" onclick="addNode('rect')" title="사각형 추가" style="font-size:11px">▭+</button>
       <button class="flow-zoom-btn" onclick="addNode('diamond')" title="다이아몬드 추가" style="font-size:11px">◇+</button>
@@ -446,8 +403,8 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
         <button class="btn btn-reject" id="flow-ctx-del" onclick="deleteCtxTarget()">삭제</button>
         <button class="btn btn-accept" onclick="applyCtxEdit()">적용</button>
       </div>
-    </div>
-  </div>` : ''}
+    </div>` : '<p class="empty">/LaLaSuggest를 실행하면 플로우 다이어그램이 여기에 표시됩니다</p>'}
+  </div>
   ${flowMermaid ? `<script src="${mermaidScriptUri}"></script>` : ''}
   <script>
     ${WEBVIEW_BASE_SCRIPT}
@@ -515,9 +472,11 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       .replace(/`(.+?)`/g, '<code class="md-inline-code">$1</code>');
   }
 
-  /* ─── 멀티라인 마크다운 렌더링 (제안 텍스트용) ─── */
-  private renderMarkdownBlock(text: string): string {
-    const lines = text.split('\n');
+  /* ─── 공통 마크다운 라인 순회 (코드블록/테이블 처리) ─── */
+  private iterateMdLines(
+    lines: string[],
+    onLine: (line: string, lineNum: number) => string,
+  ): string {
     let result = '';
     let inCode = false;
     let codeBuf = '';
@@ -531,8 +490,10 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       inTable = false;
     };
 
-    for (const line of lines) {
-      // 코드 블록 처리
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const ln = i + 1;
+
       if (line.trim().startsWith('```')) {
         if (inTable) flushTable();
         if (inCode) {
@@ -544,14 +505,9 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
         }
         continue;
       }
-      if (inCode) {
-        codeBuf += line + '\n';
-        continue;
-      }
+      if (inCode) { codeBuf += line + '\n'; continue; }
 
-      // 테이블 행 처리
       if (line.includes('|') && line.trim().startsWith('|')) {
-        // 구분선 (|---|---|) → 스킵하되 테이블 상태 유지
         if (line.match(/^\|[\s:|-]+\|$/)) continue;
         const cells = line.split('|').filter(c => c !== '').map(c => c.trim());
         tableRows.push(cells);
@@ -560,12 +516,17 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       }
       if (inTable) flushTable();
 
-      result += `<div class="md-line">${this.renderLine(line)}</div>`;
+      result += onLine(line, ln);
     }
-
     if (inTable) flushTable();
-
     return result;
+  }
+
+  /* ─── 멀티라인 마크다운 렌더링 (제안 텍스트용) ─── */
+  private renderMarkdownBlock(text: string): string {
+    return this.iterateMdLines(text.split('\n'), (line) =>
+      `<div class="md-line">${this.renderLine(line)}</div>`,
+    );
   }
 
   /* ─── 제안 카드 렌더링 ─── */
@@ -730,11 +691,30 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
     if (sections.has(heading)) { return sections.get(heading)!; }
     const norm = (s: string) => s.replace(/[#\d.:\-\s]/g, '').toLowerCase();
     const h = norm(heading);
+    if (h.length === 0) { return null; }
+
+    let bestMatch: string | null = null;
+    let bestScore = 0;
+
     for (const [key, value] of sections) {
       const k = norm(key);
-      if (k === h || h.includes(k) || k.includes(h)) { return value; }
+      if (k.length === 0) { continue; }
+      if (k === h) { return value; } // 정확 일치
+
+      // 포함 관계 체크: 짧은 쪽이 긴 쪽의 50% 이상이어야 매칭 인정
+      const shorter = Math.min(h.length, k.length);
+      const longer = Math.max(h.length, k.length);
+      if (shorter / longer < 0.3) { continue; } // 길이 비율이 너무 다르면 스킵
+
+      if (h.includes(k) || k.includes(h)) {
+        const score = shorter / longer;
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = value;
+        }
+      }
     }
-    return null;
+    return bestMatch;
   }
 
   dispose(): void {

@@ -2,7 +2,7 @@
   "name": "alyplan-vscode",
   "displayName": "LaLaPlan",
   "description": "AI 수정 제안을 시각적으로 리뷰하는 마크다운 기획서 도우미",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "license": "MIT",
   "publisher": "alyduho",
   "icon": "resources/icon.png",

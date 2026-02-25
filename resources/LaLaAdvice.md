@@ -86,6 +86,7 @@ command-version: 2
 **보고서 형식:**
 
 ```markdown
+<!-- generated-by: LaLaAdvice -->
 # 기획서 다관점 평가 보고서
 
 > 원본: [파일명] | 평가 에이전트: [N]명 | [날짜]

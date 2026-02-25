@@ -74,7 +74,15 @@ export class SuggestionDecorationProvider implements vscode.Disposable {
 
     for (const sug of suggestions) {
       const pos = resolveAnchor(mdContent, sug.anchor.headingPath, sug.anchor.textContent);
-      if (!pos) { continue; } // 위치 해석 실패 = stale
+
+      if (!pos) {
+        // stale: 위치를 찾을 수 없는 제안
+        const range = new vscode.Range(0, 0, 0, 0);
+        const hoverMessage = new vscode.MarkdownString();
+        hoverMessage.appendMarkdown(`$(warning) **[${sug.type}]** 위치를 찾을 수 없습니다: ${sug.reasoning}`);
+        staleRanges.push({ range, hoverMessage });
+        continue;
+      }
 
       const startLine = Math.max(0, pos.startLine - 1);
       const endLine = Math.max(0, pos.endLine - 1);
@@ -83,21 +91,10 @@ export class SuggestionDecorationProvider implements vscode.Disposable {
       const clampedEnd = Math.min(endLine, editor.document.lineCount - 1);
 
       const range = new vscode.Range(startLine, 0, clampedEnd, Number.MAX_SAFE_INTEGER);
-      const isStale = false; // 위치가 해석되면 stale이 아님
-
       const hoverMessage = new vscode.MarkdownString();
-      hoverMessage.appendMarkdown(`**[${sug.type}]** ${sug.reasoning}\n\n`);
-      if (isStale) {
-        hoverMessage.appendMarkdown('$(warning) **문서가 변경되어 제안이 오래되었을 수 있습니다**');
-      }
+      hoverMessage.appendMarkdown(`**[${sug.type}]** ${sug.reasoning}`);
 
-      const option: vscode.DecorationOptions = { range, hoverMessage };
-
-      if (isStale) {
-        staleRanges.push(option);
-      } else {
-        normalRanges.push(option);
-      }
+      normalRanges.push({ range, hoverMessage });
     }
 
     editor.setDecorations(this.decorationType, normalRanges);

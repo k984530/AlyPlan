@@ -17,7 +17,7 @@ export function registerInitCommand(
 
       const mdUri = editor.document.uri;
       const dir = vscode.Uri.joinPath(mdUri, '..');
-      const fileName = mdUri.path.split('/').pop()!;
+      const fileName = mdUri.path.split('/').pop() ?? '';
       const baseName = fileName.replace(/\.md$/, '');
       const dotDir = vscode.Uri.joinPath(dir, '.alyplan', baseName);
 
@@ -67,7 +67,7 @@ async function writeIfNotExists(uri: vscode.Uri, content?: string, copyFrom?: vs
     if (copyFrom) {
       await vscode.workspace.fs.copy(copyFrom, uri);
     } else {
-      await vscode.workspace.fs.writeFile(uri, Buffer.from(content!, 'utf-8'));
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(content ?? '', 'utf-8'));
     }
   }
 }

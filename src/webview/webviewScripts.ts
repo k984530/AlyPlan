@@ -77,10 +77,12 @@ function cancelEdit(btn, cardId) {
 }
 
 function switchView(view) {
+  var targetPane = document.getElementById('view-' + view);
+  if (!targetPane) { view = 'all'; targetPane = document.getElementById('view-all'); }
   document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('view-tab--active'));
   document.querySelectorAll('.view-pane').forEach(p => p.classList.remove('view-pane--active'));
   document.querySelector('.view-tab[onclick*="'+view+'"]')?.classList.add('view-tab--active');
-  document.getElementById('view-'+view)?.classList.add('view-pane--active');
+  if (targetPane) targetPane.classList.add('view-pane--active');
   if (view === 'flow' && typeof renderFlowDiagram === 'function') { renderFlowDiagram(); }
   var st = vscode.getState() || {}; st.activeView = view; vscode.setState(st);
 }
@@ -158,7 +160,11 @@ async function renderFlowDiagram() {
     attachFlowHandlers();
     applyFlowTransform();
   } catch(e) {
-    el.innerHTML = '<p class="empty">렌더링 오류: ' + e.message + '</p>';
+    var p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = '렌더링 오류: ' + (e.message || '');
+    el.innerHTML = '';
+    el.appendChild(p);
   }
 }
 
