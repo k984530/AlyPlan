@@ -25,12 +25,8 @@ export class FileWatcherService implements vscode.Disposable {
     mdWatcher.onDidChange(() => this.debouncedRefresh());
     this.disposables.push(mdWatcher);
 
-    // .flow.mmd 파일 감시 (유저 플로우 변경 시 webview 새로고침)
-    const flowWatcher = vscode.workspace.createFileSystemWatcher('**/*.flow.mmd');
-    flowWatcher.onDidChange(() => this.debouncedRefresh());
-    flowWatcher.onDidCreate(() => this.debouncedRefresh());
-    flowWatcher.onDidDelete(() => this.debouncedRefresh());
-    this.disposables.push(flowWatcher);
+    // .flow.mmd 는 웹뷰에서 직접 렌더링하므로 watcher 불필요
+    // 외부 편집 시 새로고침 버튼으로 반영
   }
 
   private onSugFileChange(uri: vscode.Uri): void {

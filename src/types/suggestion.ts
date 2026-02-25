@@ -1,8 +1,10 @@
 export interface SuggestionAnchor {
-  startLine: number;
-  endLine: number;
   textContent: string;
   headingPath: string[];
+  /** @deprecated 동적 해석으로 대체. 하위 호환용 */
+  startLine?: number;
+  /** @deprecated 동적 해석으로 대체. 하위 호환용 */
+  endLine?: number;
 }
 
 export type SuggestionType = 'replace' | 'insert_after' | 'insert_before' | 'delete';

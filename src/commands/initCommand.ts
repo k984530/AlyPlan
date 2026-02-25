@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { SuggestionService } from '../services/suggestionService.js';
+import { syncCommandsIfOutdated } from '../utils/commandVersion.js';
 
 export function registerInitCommand(
   service: SuggestionService,
@@ -44,14 +45,11 @@ export function registerInitCommand(
         `# ${baseName} - 조언\n\n_/suggest 커맨드로 제안을 생성하면 여기에 조언이 표시됩니다._\n`,
       );
 
-      // .claude/commands/AlySuggest.md 복사
+      // 슬래시 커맨드 버전 기반 자동 설치/업데이트
       const workspaceFolders = vscode.workspace.workspaceFolders;
       if (workspaceFolders) {
         const cmdDir = vscode.Uri.joinPath(workspaceFolders[0].uri, '.claude', 'commands');
-        await vscode.workspace.fs.createDirectory(cmdDir);
-        const src = vscode.Uri.joinPath(extensionUri, 'resources', 'AlySuggest.md');
-        const dest = vscode.Uri.joinPath(cmdDir, 'AlySuggest.md');
-        await writeIfNotExists(dest, undefined, src);
+        await syncCommandsIfOutdated(extensionUri, cmdDir, ['LaLaSuggest', 'LaLaAdvice']);
       }
 
       await service.scanAll();

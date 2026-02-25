@@ -1,4 +1,5 @@
 import type { Suggestion } from '../types/suggestion.js';
+import { resolveAnchor } from './resolveAnchor.js';
 
 const catLabel: Record<string, string> = {
   content: '내용',
@@ -88,7 +89,9 @@ export function generateAdviceMd(
       md += `> **조언 (${advice.length}건)**\n>\n`;
       for (const sug of advice) {
         const cat = catLabel[sug.category] || sug.category;
-        md += `> - **[${cat}]** (L${sug.anchor.startLine}) ${sug.reasoning}\n`;
+        const pos = resolveAnchor(mdContent, sug.anchor.headingPath, sug.anchor.textContent);
+        const lineRef = pos ? ` (L${pos.startLine})` : '';
+        md += `> - **[${cat}]**${lineRef} ${sug.reasoning}\n`;
       }
       md += '\n';
     }
@@ -100,7 +103,9 @@ export function generateAdviceMd(
     md += `---\n\n> **문서 전체 조언 (${noSection.length}건)**\n>\n`;
     for (const sug of noSection) {
       const cat = catLabel[sug.category] || sug.category;
-      md += `> - **[${cat}]** (L${sug.anchor.startLine}) ${sug.reasoning}\n`;
+      const pos = resolveAnchor(mdContent, sug.anchor.headingPath, sug.anchor.textContent);
+      const lineRef = pos ? ` (L${pos.startLine})` : '';
+      md += `> - **[${cat}]**${lineRef} ${sug.reasoning}\n`;
     }
     md += '\n';
   }

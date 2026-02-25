@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import type { Suggestion, SuggestionFile, DocInfo } from '../types/suggestion.js';
 import { applySuggestion, getDefaultText } from '../utils/suggestionApply.js';
-import { recalcLineNumbers } from '../utils/lineRecalc.js';
+import { resolveAnchor } from '../utils/resolveAnchor.js';
 import { generateAdviceMd } from '../utils/adviceMd.js';
 
 /**
@@ -150,20 +150,23 @@ export class SuggestionService {
 
     const text = selectedText ?? getDefaultText(suggestion);
 
-    // .md 파일 읽기
-    const mdRaw = await vscode.workspace.fs.readFile(mdUri);
-    const mdContent = Buffer.from(mdRaw).toString('utf-8');
+    // .md 파일을 에디터 버퍼에서 읽기 (디스크 대신)
+    const doc = await vscode.workspace.openTextDocument(mdUri);
+    const mdContent = doc.getText();
 
     // 텍스트 적용
-    const { newContent, lineDelta } = applySuggestion(mdContent, suggestion, text);
+    const { newContent } = applySuggestion(mdContent, suggestion, text);
 
-    // .md 파일 쓰기
-    await vscode.workspace.fs.writeFile(mdUri, Buffer.from(newContent, 'utf-8'));
+    // 에디터 버퍼에 직접 쓰기 (WorkspaceEdit 사용)
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(mdContent.length));
+    edit.replace(mdUri, fullRange, newContent);
+    await vscode.workspace.applyEdit(edit);
+    await doc.save();
 
-    // suggestion 상태 업데이트 + 라인 재계산
+    // suggestion 상태 업데이트 (라인 재계산 불필요 — 동적 위치 해석)
     const file = this.cache.get(sugJsonUri)!;
     suggestion.status = 'accepted';
-    recalcLineNumbers(file.suggestions, id, lineDelta, suggestion.anchor.startLine);
 
     // .suggestions.json 쓰기
     await this.writeSugJson(sugJsonUri, file);
@@ -198,24 +201,35 @@ export class SuggestionService {
     const mdUri = this.getMdUri(sugJsonUri);
     if (!mdUri) { return; }
 
-    const pending = file.suggestions
-      .filter(s => s.status === 'pending')
-      .sort((a, b) => b.anchor.startLine - a.anchor.startLine);
+    const pending = file.suggestions.filter(s => s.status === 'pending');
 
     if (pending.length === 0) { return; }
 
-    // 배치: md를 한 번만 읽고, 아래→위 순서로 모든 변경을 적용한 뒤, 한 번만 씀
-    const mdRaw = await vscode.workspace.fs.readFile(mdUri);
-    let mdContent = Buffer.from(mdRaw).toString('utf-8');
+    // 에디터 버퍼에서 읽기 (디스크 대신)
+    const doc = await vscode.workspace.openTextDocument(mdUri);
+    let mdContent = doc.getText();
 
-    for (const sug of pending) {
+    // 동적 해석 후 아래→위 순서로 적용 (위치 시프트 방지)
+    const withPos = pending.map(sug => ({
+      sug,
+      pos: resolveAnchor(mdContent, sug.anchor.headingPath, sug.anchor.textContent),
+    })).filter(x => x.pos !== null)
+      .sort((a, b) => b.pos!.startLine - a.pos!.startLine);
+
+    for (const { sug } of withPos) {
       const text = getDefaultText(sug);
       const { newContent } = applySuggestion(mdContent, sug, text);
       mdContent = newContent;
       sug.status = 'accepted';
     }
 
-    await vscode.workspace.fs.writeFile(mdUri, Buffer.from(mdContent, 'utf-8'));
+    // 에디터 버퍼에 직접 쓰기 (WorkspaceEdit 사용)
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
+    edit.replace(mdUri, fullRange, mdContent);
+    await vscode.workspace.applyEdit(edit);
+    await doc.save();
+
     await this.writeSugJson(sugJsonUri, file);
     await this.writeAdviceMd(sugJsonUri, file);
     this._onDidChange.fire();
@@ -239,15 +253,69 @@ export class SuggestionService {
   }
 
   /**
-   * 현재 문서 텍스트와 anchor.textContent를 비교하여 staleness를 검사합니다.
+   * headingPath + textContent로 문서 내 위치를 찾을 수 없으면 stale입니다.
    */
   checkStaleness(mdContent: string, suggestion: Suggestion): boolean {
-    const lines = mdContent.split('\n');
-    const actualText = lines.slice(
-      suggestion.anchor.startLine - 1,
-      suggestion.anchor.endLine,
-    ).join('\n');
-    return suggestion.anchor.textContent.trim() !== actualText.trim();
+    const pos = resolveAnchor(
+      mdContent,
+      suggestion.anchor.headingPath,
+      suggestion.anchor.textContent,
+    );
+    return pos === null;
+  }
+
+  /**
+   * 연동되지 않는(stale) pending 제안을 JSON에서 제거합니다.
+   * - startLine이 문서 범위를 벗어난 제안
+   * - anchor.textContent가 현재 문서 내용과 일치하지 않는 제안
+   */
+  async pruneStale(sugJsonUri: string): Promise<number> {
+    const file = this.cache.get(sugJsonUri);
+    if (!file) { return 0; }
+
+    const mdUri = this.getMdUri(sugJsonUri);
+    if (!mdUri) { return 0; }
+
+    let mdContent = '';
+    try {
+      const doc = await vscode.workspace.openTextDocument(mdUri);
+      mdContent = doc.getText();
+    } catch {
+      try {
+        const raw = await vscode.workspace.fs.readFile(mdUri);
+        mdContent = new TextDecoder('utf-8').decode(raw);
+      } catch { return 0; }
+    }
+
+    const before = file.suggestions.length;
+
+    file.suggestions = file.suggestions.filter(sug => {
+      // 이미 처리된 제안(accepted/rejected)은 유지
+      if (sug.status !== 'pending') { return true; }
+      // 문서에서 위치를 찾을 수 없으면 제거
+      if (this.checkStaleness(mdContent, sug)) { return false; }
+      return true;
+    });
+
+    const removed = before - file.suggestions.length;
+    if (removed > 0) {
+      this.log.appendLine(`[pruneStale] Removed ${removed} stale suggestions from ${sugJsonUri}`);
+      await this.writeSugJson(sugJsonUri, file);
+      await this.writeAdviceMd(sugJsonUri, file);
+      this._onDidChange.fire();
+    }
+    return removed;
+  }
+
+  /**
+   * 모든 캐시된 파일에서 stale 제안을 정리합니다.
+   */
+  async pruneAllStale(): Promise<number> {
+    let total = 0;
+    for (const uriStr of this.cache.keys()) {
+      total += await this.pruneStale(uriStr);
+    }
+    return total;
   }
 
   /**
@@ -288,6 +356,17 @@ export class SuggestionService {
 
   private async writeAdviceMd(sugJsonUriStr: string, file: SuggestionFile): Promise<void> {
     const adviceUri = this.getAdviceMdUri(sugJsonUriStr);
+
+    // LaLaAdvice가 작성한 다관점 리뷰가 있으면 덮어쓰지 않음
+    try {
+      const existing = await vscode.workspace.fs.readFile(adviceUri);
+      const content = new TextDecoder('utf-8').decode(existing);
+      if (content.includes('다관점 평가') || content.includes('종합 점수')) {
+        this.log.appendLine(`[writeAdviceMd] Skipped: LaLaAdvice review exists at ${adviceUri.fsPath}`);
+        return;
+      }
+    } catch { /* 파일 없음 → 새로 생성 */ }
+
     const mdUri = this.getMdUri(sugJsonUriStr);
     let mdContent = '';
     if (mdUri) {
@@ -309,6 +388,21 @@ export class SuggestionService {
     const uri = vscode.Uri.parse(uriStr);
     const json = JSON.stringify(file, null, 2) + '\n';
     await vscode.workspace.fs.writeFile(uri, Buffer.from(json, 'utf-8'));
+  }
+
+  /**
+   * .advice.md 파일을 읽습니다. (LaLaAdvice 결과 또는 자동 생성)
+   */
+  async readAdviceMd(mdUri: vscode.Uri): Promise<string | null> {
+    const dir = vscode.Uri.joinPath(mdUri, '..');
+    const baseName = mdUri.path.split('/').pop()!.replace(/\.md$/, '');
+    const adviceUri = vscode.Uri.joinPath(dir, '.alyplan', baseName, `${baseName}.advice.md`);
+    try {
+      const raw = await vscode.workspace.fs.readFile(adviceUri);
+      return new TextDecoder('utf-8').decode(raw);
+    } catch {
+      return null;
+    }
   }
 
   /**

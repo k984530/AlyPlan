@@ -72,10 +72,6 @@
         "title": "LaLaPlan: Initialize for Current Markdown File"
       },
       {
-        "command": "alyplan.installSuggestCommand",
-        "title": "LaLaPlan: Install /suggest Command for Claude Code"
-      },
-      {
         "command": "alyplan.showDiff",
         "title": "LaLaPlan: Show Diff",
         "icon": "$(diff)"
@@ -142,6 +138,11 @@
           "type": "string",
           "default": "#FFD54F",
           "description": "거터 아이콘 색상"
+        },
+        "alyplan.diagramFontFamily": {
+          "type": "string",
+          "default": "\"Comic Sans MS\", \"Chalkboard SE\", \"Comic Neue\", cursive",
+          "description": "다이어그램 폰트 (예: \"Comic Sans MS\", cursive)"
         }
       }
     }

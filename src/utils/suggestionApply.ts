@@ -1,30 +1,34 @@
 import type { Suggestion } from '../types/suggestion.js';
+import { resolveAnchor } from './resolveAnchor.js';
 
 export interface ApplyResult {
   newContent: string;
-  lineDelta: number;
 }
 
 /**
  * 제안을 마크다운 텍스트에 적용합니다.
- *
- * 1-based 라인 번호(anchor.startLine, endLine)를 사용하여
- * replace / insert_after / insert_before / delete 연산을 수행합니다.
- *
- * @returns 적용 후 텍스트와 라인 변화량(lineDelta)
+ * headingPath + textContent로 위치를 동적 해석하여 적용합니다.
  */
 export function applySuggestion(
   markdownContent: string,
   suggestion: Suggestion,
   selectedText: string,
 ): ApplyResult {
-  const lines = markdownContent.split('\n');
-  const { startLine, endLine } = suggestion.anchor;
-  const startIdx = startLine - 1; // 1-based → 0-based
-  const endIdx = endLine; // slice endIdx는 exclusive
+  const pos = resolveAnchor(
+    markdownContent,
+    suggestion.anchor.headingPath,
+    suggestion.anchor.textContent,
+  );
 
+  if (!pos) {
+    throw new Error(`제안 위치를 찾을 수 없습니다: "${suggestion.anchor.textContent.slice(0, 30)}..."`);
+  }
+
+  const lines = markdownContent.split('\n');
+  const startIdx = pos.startLine - 1; // 1-based → 0-based
+  const endIdx = pos.endLine;          // slice endIdx는 exclusive
   const newLines = selectedText.split('\n');
-  const oldLineCount = endIdx - startIdx;
+
   let resultLines: string[];
 
   switch (suggestion.type) {
@@ -63,19 +67,7 @@ export function applySuggestion(
       throw new Error(`Unknown suggestion type: ${suggestion.type}`);
   }
 
-  const lineDelta = (() => {
-    switch (suggestion.type) {
-      case 'replace': return newLines.length - oldLineCount;
-      case 'insert_after': return newLines.length;
-      case 'insert_before': return newLines.length;
-      case 'delete': return -oldLineCount;
-    }
-  })();
-
-  return {
-    newContent: resultLines.join('\n'),
-    lineDelta,
-  };
+  return { newContent: resultLines.join('\n') };
 }
 
 /**

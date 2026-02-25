@@ -19,12 +19,22 @@ export const WEBVIEW_CSS = `
     border-bottom: 1px solid var(--vscode-panel-border);
     display: flex; justify-content: space-between; align-items: center;
   }
+  .header-right {
+    display: flex; align-items: center; gap: 4px; margin-left: auto;
+  }
   .count {
     opacity: 0.7; font-weight: 400; font-size: 12px;
     background: var(--vscode-badge-background);
     color: var(--vscode-badge-foreground);
     padding: 2px 8px; border-radius: 10px;
   }
+  .refresh-btn {
+    background: none; border: none; color: var(--vscode-foreground);
+    font-size: 16px; cursor: pointer; opacity: 0.6;
+    margin-left: 6px; padding: 0 4px; vertical-align: middle;
+    transition: opacity 0.15s, transform 0.3s;
+  }
+  .refresh-btn:hover { opacity: 1; transform: rotate(180deg); }
   .init-chip {
     font-size: 12px; font-weight: 500;
     background: var(--vscode-button-background);
@@ -275,6 +285,26 @@ export const WEBVIEW_CSS = `
   .advice-callout__line {
     font-size: 10px; opacity: 0.5; margin-right: 4px;
   }
+
+  /* advice.md 통합 뷰 */
+  .advice-review-block {
+    margin: 16px 0; padding: 12px 14px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+  }
+  .advice-review-callout {
+    margin: 10px 0 18px; padding: 10px 14px;
+    border-left: 3px solid #AB47BC;
+    background: rgba(171,71,188,0.06);
+    border-radius: 0 6px 6px 0;
+    font-size: 12px;
+  }
+  .advice-review-callout .md-h4 {
+    color: #CE93D8; font-size: 12px; margin: 8px 0 4px;
+  }
+  .advice-review-callout .md-line { padding: 1px 4px; cursor: default; }
+  .advice-review-callout .md-line:hover { background: transparent; }
 
   /* 다이어그램 뷰 */
   .flow-toolbar {

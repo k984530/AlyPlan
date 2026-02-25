@@ -4,6 +4,7 @@ import type { Suggestion } from '../types/suggestion.js';
 import { extractFlows } from '../utils/flowParser.js';
 import { WEBVIEW_CSS } from '../webview/webviewStyles.js';
 import { WEBVIEW_BASE_SCRIPT, WEBVIEW_INIT_SCRIPT, getFlowDiagramScript } from '../webview/webviewScripts.js';
+import { resolveAnchor } from '../utils/resolveAnchor.js';
 
 /* ─── 상수 ─── */
 const TYPE_COLORS: Record<string, string> = {
@@ -32,7 +33,6 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'alyplan.reviewPanel';
   private view?: vscode.WebviewView;
   private disposables: vscode.Disposable[] = [];
-  private suppressNextRefresh = false;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -68,13 +68,16 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
         if (msg.command === 'saveFlow' && msg.text) {
           const editor = vscode.window.activeTextEditor;
           if (editor) {
-            this.suppressNextRefresh = true;
             await this.service.writeFlowMmd(editor.document.uri, msg.text);
           }
           return;
         }
         if (msg.command === 'init') {
           await vscode.commands.executeCommand('alyplan.init');
+          return;
+        }
+        if (msg.command === 'refresh') {
+          await vscode.commands.executeCommand('alyplan.refresh');
           return;
         }
         if (msg.id) {
@@ -90,11 +93,6 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
 
   private async refresh(): Promise<void> {
     if (!this.view) { return; }
-    if (this.suppressNextRefresh) {
-      this.suppressNextRefresh = false;
-      return;
-    }
-
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'markdown') {
       this.view.webview.html = this.emptyHtml();
@@ -102,7 +100,8 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     const mdContent = editor.document.getText();
-    const suggestions = this.service.getPendingSuggestionsForMd(editor.document.uri);
+    const suggestions = this.service.getPendingSuggestionsForMd(editor.document.uri)
+      .filter(s => resolveAnchor(mdContent, s.anchor.headingPath, s.anchor.textContent) !== null);
     const needsInit = !this.service.findSugJsonUriForMd(editor.document.uri);
 
     // 플로우 mermaid 소스 로드 (.flow.mmd 파일 우선, 없으면 자동 생성)
@@ -116,6 +115,9 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
     const mermaidScriptUri = this.view.webview.asWebviewUri(mermaidPath).toString();
     const cspSource = this.view.webview.cspSource;
 
+    const diagramFont = vscode.workspace.getConfiguration('alyplan').get<string>('diagramFontFamily') || '';
+    const adviceReview = await this.service.readAdviceMd(editor.document.uri);
+
     this.view.webview.html = this.buildHtml(
       editor.document.fileName.split('/').pop() ?? '',
       mdContent,
@@ -124,26 +126,32 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       mermaidScriptUri,
       cspSource,
       needsInit,
+      diagramFont,
+      adviceReview,
     );
   }
 
   /* ─── HTML 생성: 마크다운 + 인라인 카드 ─── */
 
-  private buildHtml(fileName: string, md: string, suggestions: Suggestion[], flowMermaid: string | null, mermaidScriptUri: string, cspSource: string, needsInit = false): string {
+  private buildHtml(fileName: string, md: string, suggestions: Suggestion[], flowMermaid: string | null, mermaidScriptUri: string, cspSource: string, needsInit = false, diagramFont = '', adviceReview: string | null = null): string {
     const lines = md.split('\n');
 
-    // startLine → suggestions 매핑
+    // 동적 위치 해석 후 startLine → suggestions 매핑
     const sugMap = new Map<number, Suggestion[]>();
+    const resolvedPositions = new Map<string, { startLine: number; endLine: number }>();
     for (const s of suggestions) {
-      const arr = sugMap.get(s.anchor.startLine) || [];
+      const pos = resolveAnchor(md, s.anchor.headingPath, s.anchor.textContent);
+      if (!pos) continue;
+      resolvedPositions.set(s.id, pos);
+      const arr = sugMap.get(pos.startLine) || [];
       arr.push(s);
-      sugMap.set(s.anchor.startLine, arr);
+      sugMap.set(pos.startLine, arr);
     }
 
     // 제안 anchor가 커버하는 라인 범위 (중복 렌더 방지)
     const covered = new Set<number>();
-    for (const s of suggestions) {
-      for (let l = s.anchor.startLine; l <= s.anchor.endLine; l++) covered.add(l);
+    for (const [, pos] of resolvedPositions) {
+      for (let l = pos.startLine; l <= pos.endLine; l++) covered.add(l);
     }
 
     let body = '';
@@ -153,6 +161,7 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
     let tableRows: string[][] = [];
     let sugIdx = 0;
     let i = 0;
+    const renderedIds = new Set<string>();
 
     const flushTable = () => {
       if (tableRows.length === 0) return;
@@ -199,18 +208,44 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       // 제안이 시작되는 라인
       const sugsHere = sugMap.get(ln);
       if (sugsHere) {
+        let maxEnd = ln;
         for (const sug of sugsHere) {
-          const anchorLines = lines.slice(sug.anchor.startLine - 1, sug.anchor.endLine);
+          const pos = resolvedPositions.get(sug.id);
+          if (!pos) continue;
+          const anchorLines = lines.slice(pos.startLine - 1, pos.endLine);
           sugIdx++;
+          renderedIds.add(sug.id);
 
-          body += `<div class="sug-block" onclick="revealLine(${sug.anchor.startLine})">`;
+          body += `<div class="sug-block" onclick="revealLine(${pos.startLine})">`;
           body += `<div class="sug-anchor-hl">`;
           body += this.renderMarkdownBlock(anchorLines.join('\n'));
           body += `</div>`;
           body += this.renderCard(sug, sugIdx);
           body += `</div>`;
+          if (pos.endLine > maxEnd) maxEnd = pos.endLine;
         }
-        const maxEnd = Math.max(...sugsHere.map(s => s.anchor.endLine));
+        // 점프 범위 안에 다른 제안이 있으면 함께 렌더링
+        for (let j = i + 1; j < maxEnd && j < lines.length; j++) {
+          const innerLn = j + 1;
+          const innerSugs = sugMap.get(innerLn);
+          if (innerSugs) {
+            for (const sug of innerSugs) {
+              if (renderedIds.has(sug.id)) continue;
+              const pos = resolvedPositions.get(sug.id);
+              if (!pos) continue;
+              const anchorLines = lines.slice(pos.startLine - 1, pos.endLine);
+              sugIdx++;
+              renderedIds.add(sug.id);
+
+              body += `<div class="sug-block" onclick="revealLine(${pos.startLine})">`;
+              body += `<div class="sug-anchor-hl">`;
+              body += this.renderMarkdownBlock(anchorLines.join('\n'));
+              body += `</div>`;
+              body += this.renderCard(sug, sugIdx);
+              body += `</div>`;
+            }
+          }
+        }
         i = maxEnd;
         continue;
       }
@@ -225,6 +260,21 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
     if (inTable) flushTable();
 
     // ─── 섹션별 조언 뷰: 원본 문서 + 섹션 끝마다 조언 callout ───
+
+    // advice.md 섹션별 파싱
+    let parsedAdviceSections: Map<string, string> | null = null;
+    let adviceSummaryHtml = '';
+    let adviceFooterHtml = '';
+    if (adviceReview) {
+      const parsed = this.parseAdviceBySections(adviceReview);
+      parsedAdviceSections = parsed.sectionAdvice;
+      if (parsed.summary.trim()) {
+        adviceSummaryHtml = `<div class="advice-review-block">${this.renderMarkdownBlock(parsed.summary)}</div>`;
+      }
+      if (parsed.footer.trim()) {
+        adviceFooterHtml = `<div class="advice-review-block">${this.renderMarkdownBlock(parsed.footer)}</div>`;
+      }
+    }
 
     // headingPath[0] → suggestions 그룹화
     const adviceMap = new Map<string, Suggestion[]>();
@@ -250,9 +300,11 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       html += `<div class="advice-callout__title">조언 (${items.length}건)</div>`;
       for (const sug of items) {
         const cat = CATEGORY_LABELS[sug.category] || sug.category;
-        html += `<div class="advice-callout__item" onclick="revealLine(${sug.anchor.startLine})" style="cursor:pointer">`;
+        const pos = resolvedPositions.get(sug.id);
+        const line = pos?.startLine ?? 0;
+        html += `<div class="advice-callout__item"${line > 0 ? ` onclick="revealLine(${line})" style="cursor:pointer"` : ''}>`;
         html += `<span class="advice-callout__cat">${cat}</span>`;
-        html += `<span class="advice-callout__line">L${sug.anchor.startLine}</span>`;
+        if (line > 0) html += `<span class="advice-callout__line">L${line}</span>`;
         html += this.esc(sug.reasoning);
         html += `</div>`;
       }
@@ -308,6 +360,12 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       if (hMatch && hMatch[1].length <= minLevel) {
         if (currentHeading) {
           sectionBody += makeCallout(currentHeading);
+          if (parsedAdviceSections) {
+            const matched = this.findMatchingAdvice(currentHeading, parsedAdviceSections);
+            if (matched?.trim()) {
+              sectionBody += `<div class="advice-review-callout">${this.renderMarkdownBlock(matched)}</div>`;
+            }
+          }
         }
         currentHeading = hMatch[2].trim();
       }
@@ -318,11 +376,24 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
     // 마지막 섹션 조언
     if (currentHeading) {
       sectionBody += makeCallout(currentHeading);
+      if (parsedAdviceSections) {
+        const matched = this.findMatchingAdvice(currentHeading, parsedAdviceSections);
+        if (matched?.trim()) {
+          sectionBody += `<div class="advice-review-callout">${this.renderMarkdownBlock(matched)}</div>`;
+        }
+      }
     }
     // headingPath가 없는 조언
     const noPathAdvice = adviceMap.get('');
     if (noPathAdvice && noPathAdvice.length > 0) {
       sectionBody += makeCallout('');
+    }
+    // advice.md 요약(상단) 및 통합 검증(하단)
+    if (adviceSummaryHtml) {
+      sectionBody = adviceSummaryHtml + sectionBody;
+    }
+    if (adviceFooterHtml) {
+      sectionBody += adviceFooterHtml;
     }
 
     return `<!DOCTYPE html>
@@ -336,12 +407,12 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
     <span>${this.esc(fileName)}</span>
     ${needsInit
       ? '<button class="init-chip" onclick="send(\'init\')">초기화</button>'
-      : `<span class="count">${suggestions.length}개 제안</span>`}
+      : `<span class="header-right"><span class="count">${suggestions.length}개 제안</span><button class="refresh-btn" onclick="send('refresh')" title="제안 새로고침">↻</button></span>`}
   </div>
-  ${(suggestions.length > 0 || flowMermaid) ? `
+  ${(suggestions.length > 0 || flowMermaid || adviceReview) ? `
   <div class="view-tabs">
-    <button class="view-tab view-tab--active" onclick="switchView('all')">전체 제안</button>
-    ${suggestions.length > 0 ? `<button class="view-tab" onclick="switchView('section')">섹션별 조언</button>` : ''}
+    <button class="view-tab view-tab--active" onclick="switchView('all')">제안</button>
+    ${(suggestions.length > 0 || adviceReview) ? `<button class="view-tab" onclick="switchView('section')">검증</button>` : ''}
     ${flowMermaid ? `<button class="view-tab" onclick="switchView('flow')">다이어그램</button>` : ''}
   </div>` : ''}
   <div id="view-all" class="view-pane view-pane--active">
@@ -350,7 +421,7 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       : (suggestions.length === 0 && lines.length < 2 ? '<p class="empty">처리할 제안이 없습니다</p>' : body)}
   </div>
   <div id="view-section" class="view-pane">
-    ${sectionBody || '<p class="empty">표시할 내용이 없습니다</p>'}
+    ${sectionBody || '<p class="empty">/LaLaAdvice를 실행하면 다관점 검증 결과가 여기에 표시됩니다</p>'}
   </div>
   ${flowMermaid ? `<div id="view-flow" class="view-pane">
     <div class="flow-toolbar">
@@ -380,7 +451,7 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
   ${flowMermaid ? `<script src="${mermaidScriptUri}"></script>` : ''}
   <script>
     ${WEBVIEW_BASE_SCRIPT}
-    ${flowMermaid ? getFlowDiagramScript(flowMermaid) : ''}
+    ${flowMermaid ? getFlowDiagramScript(flowMermaid, diagramFont) : ''}
     ${WEBVIEW_INIT_SCRIPT}
   </script>
 </body>
@@ -556,7 +627,7 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       ${panelsHtml}
       <div class="actions">
         <button class="btn btn-reject" onclick="send('reject','${safeId}')">거절</button>
-        ${sug.type !== 'delete' ? `<button class="btn btn-edit" onclick="startEdit('${safeId}')">수정</button>` : ''}
+
         <button class="btn btn-accept" onclick="acceptSelected('${safeId}')">
           ${hasMultiAlts ? '선택안 수락' : '수락'}
         </button>
@@ -597,6 +668,73 @@ export class SuggestionWebviewProvider implements vscode.WebviewViewProvider {
       .replace(/'/g, '&#39;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  /* ─── advice.md 섹션 파싱 ─── */
+
+  private parseAdviceBySections(adviceContent: string): {
+    summary: string;
+    sectionAdvice: Map<string, string>;
+    footer: string;
+  } {
+    const lines = adviceContent.split('\n');
+    const summary: string[] = [];
+    const sectionAdvice = new Map<string, string>();
+    const footer: string[] = [];
+
+    let state: 'summary' | 'sections' | 'footer' = 'summary';
+    let currentSection = '';
+    let currentLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.match(/^##\s+섹션별/)) {
+        state = 'sections';
+        continue;
+      }
+
+      if (state === 'sections' && line.match(/^##\s+(통합|핵심|액션)/)) {
+        if (currentSection) {
+          sectionAdvice.set(currentSection, currentLines.join('\n'));
+        }
+        state = 'footer';
+        footer.push(line);
+        continue;
+      }
+
+      if (state === 'summary') {
+        summary.push(line);
+      } else if (state === 'sections') {
+        const secMatch = line.match(/^###\s+섹션\s*\d*[:.：]\s*(.*)/);
+        if (secMatch) {
+          if (currentSection) {
+            sectionAdvice.set(currentSection, currentLines.join('\n'));
+          }
+          currentSection = secMatch[1].trim();
+          currentLines = [];
+        } else {
+          currentLines.push(line);
+        }
+      } else {
+        footer.push(line);
+      }
+    }
+
+    if (currentSection && state === 'sections') {
+      sectionAdvice.set(currentSection, currentLines.join('\n'));
+    }
+
+    return { summary: summary.join('\n'), sectionAdvice, footer: footer.join('\n') };
+  }
+
+  private findMatchingAdvice(heading: string, sections: Map<string, string>): string | null {
+    if (sections.has(heading)) { return sections.get(heading)!; }
+    const norm = (s: string) => s.replace(/[#\d.:\-\s]/g, '').toLowerCase();
+    const h = norm(heading);
+    for (const [key, value] of sections) {
+      const k = norm(key);
+      if (k === h || h.includes(k) || k.includes(h)) { return value; }
+    }
+    return null;
   }
 
   dispose(): void {

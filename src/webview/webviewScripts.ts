@@ -109,7 +109,7 @@ export const MERMAID_CONFIG = {
     nodeBorder: '#3b82f6',
     nodeTextColor: '#1e293b',
     edgeLabelBackground: '#ffffff',
-    fontFamily: 'system-ui, -apple-system, sans-serif',
+    fontFamily: '"Comic Sans MS", "Chalkboard SE", "Comic Neue", cursive',
     fontSize: '13px',
   },
   flowchart: {
@@ -123,26 +123,38 @@ export const MERMAID_CONFIG = {
 };
 
 /** 플로우 다이어그램 스크립트 생성 */
-export function getFlowDiagramScript(flowMermaidSource: string): string {
+export function getFlowDiagramScript(flowMermaidSource: string, fontFamily?: string): string {
+  const config = { ...MERMAID_CONFIG, themeVariables: { ...MERMAID_CONFIG.themeVariables } };
+  if (fontFamily) {
+    config.themeVariables.fontFamily = fontFamily;
+  }
+  const fontVar = fontFamily || MERMAID_CONFIG.themeVariables.fontFamily;
   return `
 // ─── 다이어그램 ───
 var flowMermaidSource = ${JSON.stringify(flowMermaidSource)};
+var diagramFont = ${JSON.stringify(fontVar)};
 var selectedNodeId = '', selectedNodeEl = null;
 var origStroke = '', origStrokeWidth = '';
 var ctxType = '', ctxId = '', ctxOldText = '';
 
 if (typeof mermaid !== 'undefined') {
-  mermaid.initialize(${JSON.stringify(MERMAID_CONFIG)});
+  mermaid.initialize(${JSON.stringify(config)});
 }
 
 async function renderFlowDiagram() {
   if (typeof mermaid === 'undefined') return;
   var el = document.getElementById('flow-diagram');
   if (!el || !flowMermaidSource) return;
-  el.innerHTML = '';
   try {
     var result = await mermaid.render('flow-svg-' + Date.now(), flowMermaidSource);
     el.innerHTML = result.svg;
+    // 다이어그램 폰트 후처리: Mermaid 인라인 스타일 강제 교체
+    el.querySelectorAll('text, tspan, span, div, p, foreignObject, .nodeLabel, .edgeLabel, .label').forEach(function(node) {
+      node.style.fontFamily = diagramFont;
+    });
+    el.querySelectorAll('[font-family]').forEach(function(node) {
+      node.setAttribute('font-family', diagramFont);
+    });
     attachFlowHandlers();
     applyFlowTransform();
   } catch(e) {
@@ -243,12 +255,22 @@ function attachFlowHandlers() {
 
 // ─── 노드 선택/해제 ───
 var origFill = '';
+var selectedShapeEl = null;
+
+function findMainShape(gEl) {
+  var all = gEl.querySelectorAll('rect, polygon, circle, ellipse, path');
+  for (var i = 0; i < all.length; i++) {
+    if (!all[i].closest('foreignObject')) return all[i];
+  }
+  return null;
+}
 
 function selectNode(gEl, nodeId) {
   deselectNode();
   selectedNodeEl = gEl;
   selectedNodeId = nodeId;
-  var shape = gEl.querySelector('rect') || gEl.querySelector('polygon') || gEl.querySelector('circle');
+  var shape = findMainShape(gEl);
+  selectedShapeEl = shape;
   if (shape) {
     origStroke = shape.style.stroke || '';
     origStrokeWidth = shape.style.strokeWidth || '';
@@ -261,16 +283,14 @@ function selectNode(gEl, nodeId) {
 }
 
 function deselectNode() {
-  if (selectedNodeEl) {
-    var shape = selectedNodeEl.querySelector('rect') || selectedNodeEl.querySelector('polygon') || selectedNodeEl.querySelector('circle');
-    if (shape) {
-      shape.style.stroke = origStroke;
-      shape.style.strokeWidth = origStrokeWidth;
-      shape.style.fill = origFill;
-    }
+  if (selectedShapeEl) {
+    selectedShapeEl.style.stroke = origStroke;
+    selectedShapeEl.style.strokeWidth = origStrokeWidth;
+    selectedShapeEl.style.fill = origFill;
   }
   selectedNodeEl = null;
   selectedNodeId = '';
+  selectedShapeEl = null;
   setStatus('');
 }
 

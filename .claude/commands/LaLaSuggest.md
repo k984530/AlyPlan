@@ -1,3 +1,9 @@
+---
+description: 기획서 내용을 분석하여 개선 제안을 생성합니다
+argument-hint: <마크다운 파일 경로>
+command-version: 1
+---
+
 $ARGUMENTS 파일을 읽고, 기획서 내용을 분석하여 개선 제안을 생성하세요.
 
 ## 지침
@@ -12,7 +18,7 @@ $ARGUMENTS 파일을 읽고, 기획서 내용을 분석하여 개선 제안을 �
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "sourceFile": "파일명.md",
   "generatedAt": "ISO 날짜",
   "prompt": "분석 프롬프트",
@@ -21,9 +27,7 @@ $ARGUMENTS 파일을 읽고, 기획서 내용을 분석하여 개선 제안을 �
       "id": "sug_랜덤8자리",
       "status": "pending",
       "anchor": {
-        "startLine": 1,
-        "endLine": 1,
-        "textContent": "해당 줄의 실제 텍스트",
+        "textContent": "제안 대상 텍스트 (마크다운 원문 그대로, 여러 줄이면 줄바꿈 포함)",
         "headingPath": ["## 상위 헤딩", "### 하위 헤딩"]
       },
       "type": "replace | insert_after | insert_before | delete",
@@ -57,11 +61,12 @@ $ARGUMENTS 파일을 읽고, 기획서 내용을 분석하여 개선 제안을 �
 
 ## 규칙
 
-- `anchor.startLine` / `endLine`: 1부터 시작하는 줄 번호 (정확히 파일의 줄과 일치해야 함)
-- `anchor.textContent`: 해당 줄 범위의 실제 텍스트 (staleness 검증용)
-- `originalText`: 마크다운 원문 그대로 (** 등 문법 포함)
+- **`anchor.headingPath`**: 제안이 속한 섹션 경로. 마크다운 헤딩을 상위→하위 순서로 나열 (예: `["## 3. 인증 및 로그인", "### 3.1 인증 방식"]`)
+- **`anchor.textContent`**: 제안 대상의 실제 텍스트. 마크다운 원문 그대로 정확히 복사. 문서에서 이 텍스트를 검색하여 위치를 찾으므로 **정확히 일치**해야 합니다
+- `originalText`: `textContent`와 동일하거나, 더 넓은 맥락을 포함할 수 있음
 - `alternatives`: 반드시 3개 이상의 대안을 제시. 라벨은 `"1. 설명"`, `"2. 설명"`, `"3. 설명"` 형식으로 번호를 매긴다
 - `id` 형식: 제안은 `sug_` + 8자리, 대안은 `alt_` + 4자리 랜덤 영숫자
+- **라인 번호는 사용하지 않습니다.** `startLine`/`endLine` 필드를 넣지 마세요
 
 ## 분석 관점
 

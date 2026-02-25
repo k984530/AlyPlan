@@ -9,6 +9,7 @@ import { registerRejectCommand } from './commands/rejectCommand.js';
 import { registerInitCommand } from './commands/initCommand.js';
 import { registerShowDiffCommand } from './commands/showDiffCommand.js';
 import { SuggestionWebviewProvider } from './providers/suggestionWebviewProvider.js';
+import { syncCommandsIfOutdated } from './utils/commandVersion.js';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const service = new SuggestionService();
@@ -99,35 +100,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Init command
   const initCmd = registerInitCommand(service, context.extensionUri);
 
-  // Install /suggest slash command
-  const installCmd = vscode.commands.registerCommand(
-    'alyplan.installSuggestCommand',
-    async () => {
-      const workspaceFolders = vscode.workspace.workspaceFolders;
-      if (!workspaceFolders) {
-        vscode.window.showErrorMessage('워크스페이스를 먼저 열어주세요.');
-        return;
-      }
-
-      const targetDir = vscode.Uri.joinPath(workspaceFolders[0].uri, '.claude', 'commands');
-      await vscode.workspace.fs.createDirectory(targetDir);
-
-      const src = vscode.Uri.joinPath(context.extensionUri, 'resources', 'LaLaSuggest.md');
-      const dest = vscode.Uri.joinPath(targetDir, 'LaLaSuggest.md');
-      await vscode.workspace.fs.copy(src, dest, { overwrite: true });
-
-      vscode.window.showInformationMessage(
-        '/LaLaSuggest 커맨드가 설치되었습니다. Claude Code에서 /LaLaSuggest docs/파일.md 로 사용하세요.',
-      );
-    },
-  );
 
   // Refresh
   const refreshCmd = vscode.commands.registerCommand(
     'alyplan.refresh',
     async () => {
+      // 슬래시 커맨드 버전 기반 자동 설치/업데이트
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (workspaceFolders) {
+        const cmdDir = vscode.Uri.joinPath(workspaceFolders[0].uri, '.claude', 'commands');
+        const updated = await syncCommandsIfOutdated(
+          context.extensionUri, cmdDir, ['LaLaSuggest', 'LaLaAdvice'],
+        );
+        if (updated.length > 0) {
+          const labels = updated.map(n => `/${n}`).join(', ');
+          vscode.window.showInformationMessage(`${labels} 커맨드가 업데이트되었습니다.`);
+        }
+      }
+
       await service.scanAll();
+      const removed = await service.pruneAllStale();
       decorationProvider.updateDecorations();
+      if (removed > 0) {
+        vscode.window.showInformationMessage(`연동되지 않는 제안 ${removed}건이 정리되었습니다.`);
+      }
     },
   );
 
@@ -150,7 +146,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     rejectAllCmd,
     refreshCmd,
     initCmd,
-    installCmd,
     ...showDiffDisposables,
   );
 }

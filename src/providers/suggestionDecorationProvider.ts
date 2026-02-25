@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { SuggestionService } from '../services/suggestionService.js';
+import { resolveAnchor } from '../utils/resolveAnchor.js';
 
 /**
  * pending 제안이 있는 라인에 하이라이트 + 거터 아이콘을 표시합니다.
@@ -72,14 +73,17 @@ export class SuggestionDecorationProvider implements vscode.Disposable {
     const staleRanges: vscode.DecorationOptions[] = [];
 
     for (const sug of suggestions) {
-      const startLine = Math.max(0, sug.anchor.startLine - 1);
-      const endLine = Math.max(0, sug.anchor.endLine - 1);
+      const pos = resolveAnchor(mdContent, sug.anchor.headingPath, sug.anchor.textContent);
+      if (!pos) { continue; } // 위치 해석 실패 = stale
+
+      const startLine = Math.max(0, pos.startLine - 1);
+      const endLine = Math.max(0, pos.endLine - 1);
 
       if (startLine >= editor.document.lineCount) { continue; }
       const clampedEnd = Math.min(endLine, editor.document.lineCount - 1);
 
       const range = new vscode.Range(startLine, 0, clampedEnd, Number.MAX_SAFE_INTEGER);
-      const isStale = this.service.checkStaleness(mdContent, sug);
+      const isStale = false; // 위치가 해석되면 stale이 아님
 
       const hoverMessage = new vscode.MarkdownString();
       hoverMessage.appendMarkdown(`**[${sug.type}]** ${sug.reasoning}\n\n`);
