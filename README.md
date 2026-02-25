@@ -19,7 +19,7 @@ code --install-extension alyduho.alyplan-vscode
 ```
 
 ### Open VSX (Windsurf, Antigravity 등)
-Extensions 패널에서 `alyplan` 검색 후 설치
+Extensions 패널에서 `LaLaPlan` 검색 후 설치
 
 ## 사용법
 
