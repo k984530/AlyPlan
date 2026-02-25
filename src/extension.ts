@@ -112,12 +112,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const targetDir = vscode.Uri.joinPath(workspaceFolders[0].uri, '.claude', 'commands');
       await vscode.workspace.fs.createDirectory(targetDir);
 
-      const src = vscode.Uri.joinPath(context.extensionUri, 'resources', 'AlySuggest.md');
-      const dest = vscode.Uri.joinPath(targetDir, 'AlySuggest.md');
+      const src = vscode.Uri.joinPath(context.extensionUri, 'resources', 'LaLaSuggest.md');
+      const dest = vscode.Uri.joinPath(targetDir, 'LaLaSuggest.md');
       await vscode.workspace.fs.copy(src, dest, { overwrite: true });
 
       vscode.window.showInformationMessage(
-        '/AlySuggest 커맨드가 설치되었습니다. Claude Code에서 /AlySuggest docs/파일.md 로 사용하세요.',
+        '/LaLaSuggest 커맨드가 설치되었습니다. Claude Code에서 /LaLaSuggest docs/파일.md 로 사용하세요.',
       );
     },
   );

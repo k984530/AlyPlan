@@ -1,10 +1,15 @@
 {
   "name": "alyplan-vscode",
-  "displayName": "AlyPlan",
+  "displayName": "LaLaPlan",
   "description": "AI 수정 제안을 시각적으로 리뷰하는 마크다운 기획서 도우미",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "publisher": "alyduho",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/k984530/AlyPlan"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -64,30 +69,30 @@
       },
       {
         "command": "alyplan.init",
-        "title": "AlyPlan: Initialize for Current Markdown File"
+        "title": "LaLaPlan: Initialize for Current Markdown File"
       },
       {
         "command": "alyplan.installSuggestCommand",
-        "title": "AlyPlan: Install /suggest Command for Claude Code"
+        "title": "LaLaPlan: Install /suggest Command for Claude Code"
       },
       {
         "command": "alyplan.showDiff",
-        "title": "AlyPlan: Show Diff",
+        "title": "LaLaPlan: Show Diff",
         "icon": "$(diff)"
       },
       {
         "command": "alyplan.diffAccept",
-        "title": "AlyPlan: Accept (Diff)",
+        "title": "LaLaPlan: Accept (Diff)",
         "icon": "$(check)"
       },
       {
         "command": "alyplan.diffReject",
-        "title": "AlyPlan: Reject (Diff)",
+        "title": "LaLaPlan: Reject (Diff)",
         "icon": "$(close)"
       },
       {
         "command": "alyplan.diffClose",
-        "title": "AlyPlan: Close Diff",
+        "title": "LaLaPlan: Close Diff",
         "icon": "$(arrow-left)"
       }
     ],
@@ -126,7 +131,7 @@
       ]
     },
     "configuration": {
-      "title": "AlyPlan",
+      "title": "LaLaPlan",
       "properties": {
         "alyplan.highlightColor": {
           "type": "string",
